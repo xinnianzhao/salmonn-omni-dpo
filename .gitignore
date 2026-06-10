@@ -1,0 +1,4 @@
+envs/
+artifacts/
+logs/
+scripts/*.sh

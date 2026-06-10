@@ -1,0 +1,9 @@
+{
+  "template": "short_v2",
+  "num_audio_embs": 1,
+  "num_text_tokens": 1,
+  "delta": 0.08,
+  "max_audio_len": 125,
+  "turn_wise_encode": false
+}
+

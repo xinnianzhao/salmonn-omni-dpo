@@ -1,0 +1,15 @@
+{
+  "template": "default",
+  "num_audio_embs": 1,
+  "num_text_tokens": 1,
+  "delta": 0.08,
+  "max_audio_len": 125,
+  "turn_wise_encode": false,
+  "diff_shift": true,
+  "rev_noise_ratio": 0.4,
+  "simple_mode_echo_ratio": 0.0,
+  "flexible_conv": true,
+  "same_prompt": true,
+  "reason_before_speak": false,
+  "latent_explicit_reason": false
+}

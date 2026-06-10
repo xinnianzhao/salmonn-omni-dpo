@@ -1,0 +1,8 @@
+{
+  "single_gpu": true,
+  "verbose": true,
+  "conv_dynamic": "none",
+  "oracle_start": false,
+  "echo_ratio": 1.0
+}
+

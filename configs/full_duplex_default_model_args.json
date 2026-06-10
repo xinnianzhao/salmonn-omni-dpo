@@ -1,0 +1,20 @@
+{
+  "model_name_or_path": "/mnt/bn/audio-visual-llm-data2/yuwenyi/ckpt/Meta-Llama-3-8B-Instruct/",
+  "attn_implementation": "flash_attention_2",
+  "backbone": "llama3",
+  "backbone_setting": ["lora", "32", "32", "0.1"],
+  "speech_encoder_type": "transformer_v2",
+  "speech_encoder_trainable": false,
+  "speech_enc_llm_proj_setting": ["4", "4096"],
+  "speech_synthesizer_type": "none",
+  "add_assist_stream": true,
+  "simple_mode": true,
+  "lazy_encode": true,
+  "add_eor_token": false,
+  "add_clause_sep_token": false,
+  "add_end_of_speech": true,
+  "enable_latent_reasoning": false,
+  "add_duplex_head": false,
+  "duplex_head_transformer": false,
+  "latent_asr": false
+}

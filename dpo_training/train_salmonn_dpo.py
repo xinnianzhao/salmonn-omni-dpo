@@ -135,14 +135,25 @@ class SalmonnDPOTrainer(Trainer):
 
         sft_loss = chosen_outputs.loss if chosen_outputs.loss is not None else torch.zeros_like(dpo_loss)
         loss = dpo_loss + self.dpo_args.lambda_sft * sft_loss
+        preference_accuracy = (dpo_logits > 0).float().mean()
+        chosen_reward = self.dpo_args.beta * (pi_chosen_logps - ref_chosen_logps)
+        rejected_reward = self.dpo_args.beta * (pi_rejected_logps - ref_rejected_logps)
+        reward_margin = chosen_reward - rejected_reward
+        approx_kl = (pi_chosen_logps - ref_chosen_logps).detach().float().mean()
 
         self.log(
             {
                 "dpo_loss": dpo_loss.detach().float().item(),
                 "sft_loss": sft_loss.detach().float().item(),
+                "total_loss": loss.detach().float().item(),
+                "preference_accuracy": preference_accuracy.detach().float().item(),
                 "preference_margin": dpo_logits.detach().float().mean().item(),
                 "chosen_logp": pi_chosen_logps.detach().float().mean().item(),
                 "rejected_logp": pi_rejected_logps.detach().float().mean().item(),
+                "chosen_reward": chosen_reward.detach().float().mean().item(),
+                "rejected_reward": rejected_reward.detach().float().mean().item(),
+                "reward_margin": reward_margin.detach().float().mean().item(),
+                "approx_kl_chosen": approx_kl.item(),
             }
         )
         return (loss, {"chosen_outputs": chosen_outputs}) if return_outputs else loss

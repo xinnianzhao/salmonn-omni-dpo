@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -93,8 +92,8 @@ def main() -> None:
         else iter_topics(args.topic_file, limit=args.limit, offset=args.offset)
     )
     with output_jsonl.open("a", encoding="utf-8") as out_f:
-        for topic_item in topic_iter:
-            record = run_episode_pair(args, artifact_dir, qwen, tts, full_duplex, topic_item)
+        for episode_idx, topic_item in enumerate(topic_iter):
+            record = run_episode_pair(args, artifact_dir, qwen, tts, full_duplex, topic_item, episode_idx)
             out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
             out_f.flush()
             print(f"Wrote episode pair {record['session_id']} status={record['status']}", flush=True)
@@ -115,9 +114,10 @@ def run_episode_pair(
     tts: TTSClient,
     full_duplex: FullDuplexEvalClient,
     topic_item: dict[str, str],
+    episode_idx: int,
 ) -> dict:
     topic = topic_item["topic"]
-    pair_session_id = f"{uuid.uuid4().hex[:12]}"
+    pair_session_id = f"ep{episode_idx}"
     rollouts = []
     errors = []
 

@@ -59,3 +59,72 @@ sbatch scripts/sbatch_salmonn_dpo.slurm
 The trainer defaults to LoRA-only updates with a frozen SFT reference model. The
 base Llama backbone and reference model remain frozen.
 
+## Judge/DPO Conversion
+
+Keep the raw orchestration output for debugging:
+
+```text
+episode_pairs.jsonl
+```
+
+Then extract compact text-only files for Claude:
+
+```bash
+python3 scripts/extract_pairs_for_judge.py \
+  --input-jsonl artifacts/dpo_episode_pair_smoke/60523385/episode_pairs.jsonl \
+  --episode-output artifacts/judge/episode_pairs_for_judge.jsonl \
+  --last-turn-output artifacts/judge/last_turn_pairs_for_judge.jsonl \
+  --last-turn 5
+```
+
+The judge files contain only IDs, topic/source, text conversations, candidates,
+and judge instructions. They intentionally omit audio paths, latency, commands,
+tracebacks, and model configs.
+
+After Claude returns judge results with fields like:
+
+```json
+{"id": "ep0", "pair_type": "episode", "winner": "A", "reason": "..."}
+{"id": "ep0_turn5", "raw_session_id": "ep0", "pair_type": "last_turn", "target_turn": 5, "winner": "B", "reason": "..."}
+```
+
+merge them back with the raw file to make trainer-ready DPO pairs:
+
+```bash
+python3 scripts/prepare_dpo_pairs.py \
+  --raw-jsonl artifacts/dpo_episode_pair_smoke/60523385/episode_pairs.jsonl \
+  --judge-json artifacts/judge/claude_judged_pairs.jsonl \
+  --episode-output artifacts/dpo/episode_pairs_dpo.jsonl \
+  --last-turn-output artifacts/dpo/last_turn_pairs_dpo.jsonl
+```
+
+The DPO files preserve SALMONN `conv_v2` items under `chosen` and `rejected`,
+including `user_path` and `assistant_path`, so they can be passed directly to
+`dpo_training/train_salmonn_dpo.py`.
+
+## W&B Tracking
+
+The Slurm launcher logs to W&B by default:
+
+```bash
+WANDB_PROJECT=salmonn-omni-dpo \
+WANDB_RUN_NAME=dpo-last-turn-v1 \
+LAST_TURN_DPO_PATH=/path/to/last_turn_pairs.jsonl \
+sbatch scripts/sbatch_salmonn_dpo.slurm
+```
+
+To disable network logging while testing:
+
+```bash
+WANDB_MODE=offline REPORT_TO=wandb ...
+```
+
+or:
+
+```bash
+REPORT_TO=none ...
+```
+
+The trainer logs `dpo_loss`, `sft_loss`, `total_loss`,
+`preference_accuracy`, `preference_margin`, chosen/rejected log-probs,
+implicit rewards, reward margin, and approximate KL on chosen responses.

@@ -133,7 +133,7 @@ class FullDuplexEvalClient:
 
     def _build_command(self, *, dataset_path: Path, output_dir: Path, num_turn: int) -> list[str]:
         model_args = {
-            "model_name_or_path": "/mnt/bn/audio-visual-llm-data2/yuwenyi/ckpt/Meta-Llama-3-8B-Instruct/",
+            "model_name_or_path": "${HF_HOME}/hub/models--meta-llama--Meta-Llama-3-8B-Instruct",
             "ckpt_path": str(self.checkpoint_dir),
             "attn_implementation": "flash_attention_2",
             "backbone": "llama3",
@@ -145,6 +145,7 @@ class FullDuplexEvalClient:
             "add_end_of_speech": True,
             **self.model_args,
         }
+        model_args["model_name_or_path"] = str(_resolve_hf_cache_model_path(model_args["model_name_or_path"]))
         data_args = {
             "dataset_dir": str(dataset_path),
             "template": self.template,
@@ -183,6 +184,38 @@ class FullDuplexEvalClient:
             pythonpath.append(env["PYTHONPATH"])
         env["PYTHONPATH"] = os.pathsep.join(pythonpath)
         return env
+
+
+def _resolve_hf_cache_model_path(path_or_model_id: Any) -> str | Path:
+    """Resolve HF cache repo roots to a concrete snapshot directory.
+
+    Transformers accepts either a Hub repo id or a local model directory. The
+    cache root `.../hub/models--org--repo` is not directly loadable; the usable
+    files live under `snapshots/<revision>`.
+    """
+
+    raw = os.path.expandvars(os.path.expanduser(str(path_or_model_id)))
+    path = Path(raw)
+    if not path.exists():
+        return raw
+    if (path / "config.json").exists() or (path / "tokenizer_config.json").exists():
+        return path
+
+    snapshots_dir = path / "snapshots"
+    if not snapshots_dir.is_dir():
+        return path
+
+    ref_path = path / "refs" / "main"
+    if ref_path.exists():
+        revision = ref_path.read_text(encoding="utf-8").strip()
+        snapshot = snapshots_dir / revision
+        if snapshot.exists():
+            return snapshot
+
+    snapshots = sorted([p for p in snapshots_dir.iterdir() if p.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+    if snapshots:
+        return snapshots[0]
+    return path
 
 
 def _hf_arg(key: str, value: Any) -> list[str]:

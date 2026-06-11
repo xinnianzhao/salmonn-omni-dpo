@@ -1,5 +1,5 @@
 {
-  "model_name_or_path": "/mnt/bn/audio-visual-llm-data2/yuwenyi/ckpt/Meta-Llama-3-8B-Instruct/",
+  "model_name_or_path": "${HF_HOME}/hub/models--meta-llama--Meta-Llama-3-8B-Instruct",
   "attn_implementation": "flash_attention_2",
   "backbone": "llama3",
   "backbone_setting": ["lora", "32", "32", "0.1"],

@@ -21,7 +21,6 @@ import signal
 import subprocess
 import sys
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -167,8 +166,8 @@ def main() -> None:
     )
 
     with output_jsonl.open("a", encoding="utf-8") as out_f:
-        for topic_item in iter_topics(args.topic_file, limit=args.limit, offset=args.offset):
-            record = run_episode_pair(args, artifact_dir, full_duplex, topic_item)
+        for episode_idx, topic_item in enumerate(iter_topics(args.topic_file, limit=args.limit, offset=args.offset)):
+            record = run_episode_pair(args, artifact_dir, full_duplex, topic_item, episode_idx)
             out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
             out_f.flush()
             print(f"wrote episode pair {record['session_id']} status={record['status']}", flush=True)
@@ -179,8 +178,9 @@ def run_episode_pair(
     artifact_dir: Path,
     full_duplex: FullDuplexEvalClient,
     topic_item: dict[str, str],
+    episode_idx: int,
 ) -> dict[str, Any]:
-    pair_session_id = uuid.uuid4().hex[:12]
+    pair_session_id = f"ep{episode_idx}"
     rollouts = []
     errors = []
     for rollout_idx in range(args.rollouts):

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --account=lp_nelf
-#SBATCH --job-name=dpo-episode-pair-smoke
+#SBATCH --job-name=dpo-episode-api
 #SBATCH --time=12:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
@@ -21,12 +21,13 @@ export HF_HOME="${HF_HOME:-/scratch/leuven/362/vsc36212/HuggingFace}"
 TOPIC_FILE="${TOPIC_FILE:-/lustre1/scratch/362/vsc36212/dataset/dpo/duplex_data/conv_natural_trivia_220k.json}"
 TOPIC_OFFSET="${TOPIC_OFFSET:-0}"
 NUM_TOPICS="${NUM_TOPICS:-5}"
+CHUNK_SIZE="${CHUNK_SIZE:-5}"
 NUM_ROLLOUTS="${NUM_ROLLOUTS:-2}"
 NUM_TURNS="${NUM_TURNS:-5}"
 QWEN_PORT="${QWEN_PORT:-8001}"
 TTS_PORT="${TTS_PORT:-8021}"
 FULL_DUPLEX_PORT="${FULL_DUPLEX_PORT:-8031}"
-OUT_DIR="${OUT_DIR:-${ROOT_DIR}/artifacts/dpo_episode_pair_smoke/${SLURM_JOB_ID}}"
+OUT_DIR="${OUT_DIR:-${ROOT_DIR}/artifacts/dpo_episode_pair_chunked_service_smoke/${SLURM_JOB_ID}}"
 
 mkdir -p "${ROOT_DIR}/logs" "${OUT_DIR}"
 cd "${ROOT_DIR}"
@@ -45,29 +46,9 @@ echo "OUT_DIR=${OUT_DIR}"
 echo "TOPIC_FILE=${TOPIC_FILE}"
 echo "TOPIC_OFFSET=${TOPIC_OFFSET}"
 echo "NUM_TOPICS=${NUM_TOPICS}"
+echo "CHUNK_SIZE=${CHUNK_SIZE}"
 echo "NUM_ROLLOUTS=${NUM_ROLLOUTS}"
 echo "NUM_TURNS=${NUM_TURNS}"
-echo "FULL_DUPLEX_PORT=${FULL_DUPLEX_PORT}"
-
-if [[ ! -x "${FULL_DUPLEX_PYTHON}" ]]; then
-  echo "ERROR: FULL_DUPLEX_PYTHON is not executable: ${FULL_DUPLEX_PYTHON}" >&2
-  exit 2
-fi
-if [[ ! -x "${TTS_ENV}/bin/python" ]]; then
-  echo "ERROR: TTS python not found: ${TTS_ENV}/bin/python" >&2
-  exit 2
-fi
-
-echo "Checking full-duplex Python imports"
-(
-  export PYTHONPATH="${ROOT_DIR}/compat:/lustre1/scratch/362/vsc36212/projects/salmonn-omni-dev:/lustre1/scratch/362/vsc36212/projects/salmonn-omni/salmonn-omni-dev-mine-demo/models:/lustre1/scratch/362/vsc36212/projects/salmonn-omni/salmonn-omni-dev-mine-demo/third_party/Matcha-TTS:${PYTHONPATH:-}"
-  "${FULL_DUPLEX_PYTHON}" - <<'PY'
-import importlib
-for name in ("torch", "torchaudio", "transformers", "peft", "kaldifeat", "kaldifst", "lhotse", "safetensors", "cosyvoice"):
-    importlib.import_module(name)
-print("full_duplex_imports_ok")
-PY
-)
 
 cleanup() {
   jobs -pr | xargs -r kill 2>/dev/null || true
@@ -91,7 +72,7 @@ echo "Starting TTS service on GPU 2 port ${TTS_PORT}"
   export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
   export COSYVOICE_REPO_DIR="${COSYVOICE_REPO_DIR:-/lustre1/scratch/362/vsc36212/projects/salmonn-omni/salmonn-omni-dev-mine-demo}"
   export COSYVOICE_MODEL_DIR="${COSYVOICE_MODEL_DIR:-/lustre1/project/stg_00197/projects/salmonn-omni/playground/tts/CosyVoice2-0.5B}"
-  export XDG_CACHE_HOME="${ROOT_DIR}/.cache/dpo_episode_pair_smoke/${SLURM_JOB_ID}/tts"
+  export XDG_CACHE_HOME="${ROOT_DIR}/.cache/dpo_episode_pair_chunked_service_smoke/${SLURM_JOB_ID}/tts"
   export MPLCONFIGDIR="${XDG_CACHE_HOME}/matplotlib"
   export NUMBA_CACHE_DIR="${XDG_CACHE_HOME}/numba"
   mkdir -p "${XDG_CACHE_HOME}" "${MPLCONFIGDIR}" "${NUMBA_CACHE_DIR}"
@@ -102,12 +83,11 @@ echo "Starting full-duplex API on GPU 3 port ${FULL_DUPLEX_PORT}"
 (
   export CUDA_VISIBLE_DEVICES=3
   export ROOT_DIR="${ROOT_DIR}"
-  export FULL_DUPLEX_SERVER_PYTHON="${FULL_DUPLEX_PYTHON}"
-  export FULL_DUPLEX_DEVICE_ID=0
-  export FULL_DUPLEX_BACKEND=in_memory
-  export FULL_DUPLEX_WORK_DIR="${OUT_DIR}/full_duplex_service"
+  export QWEN_ENV="${QWEN_ENV}"
   export PORT="${FULL_DUPLEX_PORT}"
-  export PYTHONPATH="${ROOT_DIR}:${ROOT_DIR}/compat:${PYTHONPATH:-}"
+  export FULL_DUPLEX_DEVICE_ID=0
+  export FULL_DUPLEX_PYTHON="${FULL_DUPLEX_PYTHON}"
+  export FULL_DUPLEX_WORK_DIR="${OUT_DIR}/full_duplex_service"
   bash "${ROOT_DIR}/scripts/start_full_duplex_service.sh"
 ) >"${OUT_DIR}/full_duplex_service.log" 2>&1 &
 
@@ -121,12 +101,9 @@ wait_for_http() {
     elapsed=$((elapsed + 5))
     if (( elapsed >= max_wait )); then
       echo "ERROR: timed out waiting for ${name} at ${url}" >&2
-      echo "Qwen log: ${OUT_DIR}/qwen_server.log" >&2
-      echo "TTS log: ${OUT_DIR}/tts_server.log" >&2
-      echo "Full-duplex log: ${OUT_DIR}/full_duplex_service.log" >&2
       tail -n 80 "${OUT_DIR}/qwen_server.log" || true
       tail -n 80 "${OUT_DIR}/tts_server.log" || true
-      tail -n 120 "${OUT_DIR}/full_duplex_service.log" || true
+      tail -n 80 "${OUT_DIR}/full_duplex_service.log" || true
       exit 3
     fi
   done
@@ -135,15 +112,15 @@ wait_for_http() {
 
 wait_for_http "Qwen" "http://127.0.0.1:${QWEN_PORT}/v1/models" 1800
 wait_for_http "TTS" "http://127.0.0.1:${TTS_PORT}/health" 900
-wait_for_http "Full-duplex" "http://127.0.0.1:${FULL_DUPLEX_PORT}/health" 180
+wait_for_http "Full-duplex" "http://127.0.0.1:${FULL_DUPLEX_PORT}/health" 120
 
-echo "Running 5-topic, 2-rollout chunked orchestrator against full-duplex API"
+echo "Running chunked orchestrator against full-duplex API"
 export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 "${QWEN_ENV}/bin/python" scripts/orchestrate_full_duplex_responses_chunked.py \
   --topic-file "${TOPIC_FILE}" \
   --offset "${TOPIC_OFFSET}" \
   --limit "${NUM_TOPICS}" \
-  --chunk-size "${NUM_TOPICS}" \
+  --chunk-size "${CHUNK_SIZE}" \
   --rollouts "${NUM_ROLLOUTS}" \
   --turns "${NUM_TURNS}" \
   --artifact-dir "${OUT_DIR}/artifacts" \
@@ -158,3 +135,4 @@ export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 echo "Smoke output JSONL: ${OUT_DIR}/episode_pairs.jsonl"
 wc -l "${OUT_DIR}/episode_pairs.jsonl"
 du -sh "${OUT_DIR}"
+

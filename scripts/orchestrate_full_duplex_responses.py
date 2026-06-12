@@ -93,7 +93,7 @@ def main() -> None:
     )
     with output_jsonl.open("a", encoding="utf-8") as out_f:
         for episode_idx, topic_item in enumerate(topic_iter):
-            record = run_episode_pair(args, artifact_dir, qwen, tts, full_duplex, topic_item, episode_idx)
+            record = run_episode_pair(args, artifact_dir, qwen, tts, full_duplex, topic_item, args.offset + episode_idx)
             out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
             out_f.flush()
             print(f"Wrote episode pair {record['session_id']} status={record['status']}", flush=True)

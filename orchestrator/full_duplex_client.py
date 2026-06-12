@@ -70,17 +70,54 @@ class FullDuplexEvalClient:
         ``assistant``, and ``assistant_path``. The target turn needs only
         ``user_path``.
         """
-        self._validate()
         run_id = run_id or f"{session_id}_turn{turn_id:02d}"
-        run_dir = self.work_dir / session_id / run_id
+        results = self.generate_batch_turns(
+            requests=[
+                {
+                    "session_id": session_id,
+                    "turn_id": turn_id,
+                    "conv_turns": conv_turns,
+                    "run_id": run_id,
+                }
+            ],
+            batch_id=run_id,
+        )
+        return results[run_id]
+
+    def generate_batch_turns(
+        self,
+        *,
+        requests: list[dict[str, Any]],
+        batch_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Generate assistant responses for many same-turn sessions.
+
+        ``evaluate_hf.py`` accepts a dataset containing multiple items, but
+        only one global ``--num_turn``. Therefore every request in a batch must
+        target the same turn id.
+        """
+        self._validate()
+        if not requests:
+            return {}
+
+        turn_ids = {int(req["turn_id"]) for req in requests}
+        if len(turn_ids) != 1:
+            raise FullDuplexEvalError(f"Batch {batch_id} has mixed turn ids: {sorted(turn_ids)}")
+        turn_id = turn_ids.pop()
+
+        run_dir = self.work_dir / "batches" / batch_id
         input_dir = run_dir / "input"
         output_dir = run_dir / "output"
         input_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        item_id = run_id
-        dataset_path = input_dir / f"{run_id}.json"
-        dataset = [{"id": item_id, "task": self.task, "text": conv_turns}]
+        dataset = []
+        item_ids = []
+        for req in requests:
+            item_id = req.get("run_id") or f"{req['session_id']}_turn{int(req['turn_id']):02d}"
+            item_ids.append(item_id)
+            dataset.append({"id": item_id, "task": self.task, "text": req["conv_turns"]})
+        dataset_path = input_dir / f"{batch_id}.json"
         dataset_path.write_text(json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8")
 
         cmd = self._build_command(dataset_path=dataset_path, output_dir=output_dir, num_turn=turn_id)
@@ -112,17 +149,26 @@ class FullDuplexEvalClient:
         if not result_path.exists():
             raise FullDuplexEvalError(f"Expected evaluator output not found: {result_path}")
         result = json.loads(result_path.read_text(encoding="utf-8"))
-        if item_id not in result:
-            raise FullDuplexEvalError(f"Evaluator output missing item id {item_id}: {result_path}")
+        missing = [item_id for item_id in item_ids if item_id not in result]
+        if missing:
+            raise FullDuplexEvalError(f"Evaluator output missing item ids {missing}: {result_path}")
+
+        per_item_latency_ms = latency_ms / max(len(item_ids), 1)
         return {
-            "text": str(result[item_id]).strip(),
-            "latency_ms": latency_ms,
-            "metadata": {
-                "run_dir": str(run_dir),
-                "dataset_path": str(dataset_path),
-                "result_path": str(result_path),
-                "command": cmd,
-            },
+            item_id: {
+                "text": str(result[item_id]).strip(),
+                "latency_ms": per_item_latency_ms,
+                "metadata": {
+                    "run_dir": str(run_dir),
+                    "dataset_path": str(dataset_path),
+                    "result_path": str(result_path),
+                    "command": cmd,
+                    "batch_id": batch_id,
+                    "batch_size": len(item_ids),
+                    "batch_latency_ms": latency_ms,
+                },
+            }
+            for item_id in item_ids
         }
 
     def _validate(self) -> None:
